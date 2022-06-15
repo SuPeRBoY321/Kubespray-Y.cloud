@@ -1,27 +1,37 @@
-# Variables Yandex cloud
+# Variables
 
 variable "yc_token" {
-  type= string
-  description = "This is Yandex Cloud token"
+  type = string
+  description = "Yandex Cloud API key"
 }
 
 variable "yc_cloud_id" {
-  type= string
-  description = "This is Yandex Cloud id"
+  type = string
+  description = "Yandex Cloud id"
 }
 
 variable "yc_folder_id" {
-  type= string
-  description = "This is Yandex Cloud folder id"
+  type = string
+  description = "Yandex Cloud folder id"
 }
 
 # Provider
+
+terraform {
+  required_providers {
+    yandex = {
+      source  = "yandex-cloud/yandex"
+    }
+  }
+}
 
 provider "yandex" {
   token     = var.yc_token
   cloud_id  = var.yc_cloud_id
   folder_id = var.yc_folder_id
 }
+
+# Network
 
 # Network
 
@@ -33,7 +43,7 @@ resource "yandex_vpc_subnet" "k8s-subnet-1" {
   name           = "k8s-subnet-1"
   zone           = "ru-central1-a"
   network_id     = yandex_vpc_network.k8s-network.id
-  v4_cidr_blocks = ["192.168.10.0/24"]
+  v4_cidr_blocks = ["192.168.1.0/24"]
   depends_on = [
     yandex_vpc_network.k8s-network,
   ]
@@ -43,7 +53,7 @@ resource "yandex_vpc_subnet" "k8s-subnet-2" {
   name           = "k8s-subnet-2"
   zone           = "ru-central1-b"
   network_id     = yandex_vpc_network.k8s-network.id
-  v4_cidr_blocks = ["192.168.20.0/24"]
+  v4_cidr_blocks = ["192.168.2.0/24"]
   depends_on = [
     yandex_vpc_network.k8s-network,
   ]
@@ -53,33 +63,33 @@ resource "yandex_vpc_subnet" "k8s-subnet-3" {
   name           = "k8s-subnet-3"
   zone           = "ru-central1-c"
   network_id     = yandex_vpc_network.k8s-network.id
-  v4_cidr_blocks = ["192.168.30.0/24"]
+  v4_cidr_blocks = ["192.168.3.0/24"]
   depends_on = [
     yandex_vpc_network.k8s-network,
   ]
 }
-
+ 
 # Service accounts
 
-resource "yandex_iam_service_account" "admin" {
-  name = "admin"
+resource "yandex_iam_service_account" "administrator" {
+  name = "administrator"
 }
 
 resource "yandex_resourcemanager_folder_iam_binding" "editor" {
   folder_id = var.yc_folder_id
   role = "editor"
   members = [
-    "serviceAccount:${yandex_iam_service_account.admin.id}",
+    "serviceAccount:${yandex_iam_service_account.administrator.id}",
   ]
   depends_on = [
-    yandex_iam_service_account.admin,
+    yandex_iam_service_account.administrator,
   ]
 }
 
 resource "yandex_iam_service_account_static_access_key" "static-access-key" {
-  service_account_id = yandex_iam_service_account.admin.id
+  service_account_id = yandex_iam_service_account.administrator.id
   depends_on = [
-    yandex_iam_service_account.admin,
+    yandex_iam_service_account.administrator,
   ]
 }
 
@@ -87,26 +97,30 @@ resource "yandex_iam_service_account_static_access_key" "static-access-key" {
 
 resource "yandex_compute_instance_group" "k8s-masters" {
   name               = "k8s-masters"
-  service_account_id = yandex_iam_service_account.admin.id
+  service_account_id = yandex_iam_service_account.administrator.id
   depends_on = [
-    yandex_iam_service_account.admin,
+    yandex_iam_service_account.administrator,
     yandex_resourcemanager_folder_iam_binding.editor,
     yandex_vpc_network.k8s-network,
     yandex_vpc_subnet.k8s-subnet-1,
     yandex_vpc_subnet.k8s-subnet-2,
     yandex_vpc_subnet.k8s-subnet-3,
   ]
-
+  
+  # Шаблон экземпляра, к которому принадлежит группа экземпляров.
   instance_template {
 
+    # Имя виртуальных машин, создаваемых Instance Groups
     name = "master-{instance.index}"
 
+    # Ресурсы, которые будут выделены для создания виртуальных машин в Instance Groups
     resources {
       cores  = 2
       memory = 2
-      core_fraction = 20
+      core_fraction = 20 # Базовый уровень производительности vCPU. https://cloud.yandex.ru/docs/compute/concepts/performance-levels
     }
 
+    # Загрузочный диск в виртуальных машинах в Instance Groups
     boot_disk {
       initialize_params {
         image_id = "fd8vmcue7aajpmeo39kk" # Ubuntu 20.04 LTS
@@ -122,6 +136,7 @@ resource "yandex_compute_instance_group" "k8s-masters" {
         yandex_vpc_subnet.k8s-subnet-2.id,
         yandex_vpc_subnet.k8s-subnet-3.id,
       ]
+      # Флаг nat true указывает что виртуалкам будет предоставлен публичный IP адрес.
       nat = true
     }
 
@@ -159,9 +174,9 @@ resource "yandex_compute_instance_group" "k8s-masters" {
 
 resource "yandex_compute_instance_group" "k8s-workers" {
   name               = "k8s-workers"
-  service_account_id = yandex_iam_service_account.admin.id
+  service_account_id = yandex_iam_service_account.administrator.id
   depends_on = [
-    yandex_iam_service_account.admin,
+    yandex_iam_service_account.administrator,
     yandex_resourcemanager_folder_iam_binding.editor,
     yandex_vpc_network.k8s-network,
     yandex_vpc_subnet.k8s-subnet-1,
@@ -194,6 +209,7 @@ resource "yandex_compute_instance_group" "k8s-workers" {
         yandex_vpc_subnet.k8s-subnet-2.id,
         yandex_vpc_subnet.k8s-subnet-3.id,
       ]
+      # Флаг nat true указывает что виртуалкам будет предоставлен публичный IP адрес.
       nat = true
     }
 
@@ -231,9 +247,9 @@ resource "yandex_compute_instance_group" "k8s-workers" {
 
 resource "yandex_compute_instance_group" "k8s-ingresses" {
   name               = "k8s-ingresses"
-  service_account_id = yandex_iam_service_account.admin.id
+  service_account_id = yandex_iam_service_account.administrator.id
   depends_on = [
-    yandex_iam_service_account.admin,
+    yandex_iam_service_account.administrator,
     yandex_resourcemanager_folder_iam_binding.editor,
     yandex_vpc_network.k8s-network,
     yandex_vpc_subnet.k8s-subnet-1,
@@ -270,6 +286,7 @@ resource "yandex_compute_instance_group" "k8s-ingresses" {
         yandex_vpc_subnet.k8s-subnet-2.id,
         yandex_vpc_subnet.k8s-subnet-3.id,
       ]
+      # Флаг nat true указывает что виртуалкам будет предоставлен публичный IP адрес.
       nat = true
     }
 
@@ -333,8 +350,8 @@ resource "yandex_lb_network_load_balancer" "k8s-load-balancer" {
 
 # Backet for storing cluster backups
 
-resource "yandex_storage_bucket" "backup-backet" {
-  bucket = "backup-backet"
+resource "yandex_storage_bucket" "backup-backet-azizbekov" {
+  bucket = "backup-backet-azizbekov"
   force_destroy = true
   access_key = yandex_iam_service_account_static_access_key.static-access-key.access_key
   secret_key = yandex_iam_service_account_static_access_key.static-access-key.secret_key
@@ -377,7 +394,7 @@ output "instance_group_ingresses_private_ips" {
 
 output "load_balancer_public_ip" {
   description = "Public IP address of load balancer"
-  value = yandex_lb_network_load_balancer.k8s-load-balancer.listener.*.external_address_spec.0.address
+  value = yandex_lb_network_load_balancer.k8s-load-balancer.listener.*.external_address_spec[0].*.address
 }
 
 output "static-key-access-key" {
@@ -388,4 +405,5 @@ output "static-key-access-key" {
 output "static-key-secret-key" {
   description = "Secret key for admin user"
   value = yandex_iam_service_account_static_access_key.static-access-key.secret_key
+  sensitive = true
 }
